@@ -5,6 +5,9 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import connectDB from './config/config.js';
 import authRoutes from './routes/authRoutes.js';
+import transactionRoutes from './routes/transactionRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
+import budgetRoutes from './routes/budgetRoutes.js';
 import errorHandler from './middlewares/errorHandler.js';
 import notFoundHandler from './middlewares/notFoundHandler.js';
 
@@ -46,6 +49,15 @@ app.get('/health', (req, res) => {
 
 // Authentication Routes (POST /auth/register, POST /auth/login, POST /auth/logout)
 app.use('/auth', authRoutes);
+
+// Transaction Routes (POST /transactions, GET /transactions, DELETE /transactions/:id)
+app.use('/transactions', transactionRoutes);
+
+// Analytics Routes (GET /analytics/summary, GET /analytics/category-breakdown, GET /analytics/monthly-trends)
+app.use('/analytics', analyticsRoutes);
+
+// Budget Routes (GET /budgets, POST /budgets, PATCH /budgets/:id, DELETE /budgets/:id)
+app.use('/budgets', budgetRoutes);
 
 // 404 Handler for undefined routes
 app.use(notFoundHandler);

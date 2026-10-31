@@ -16,7 +16,7 @@ const connectDB = async () => {
         return conn;
     } catch (err) {
         console.error('MongoDB connection error:', err.message);
-        process.exit(1);
+        console.error('⚠️  Action required: Whitelist your current IP address on MongoDB Atlas (Network Access -> Add IP Address).');
     }
 };
 
