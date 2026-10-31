@@ -8,6 +8,8 @@ import authRoutes from './routes/authRoutes.js';
 import transactionRoutes from './routes/transactionRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import budgetRoutes from './routes/budgetRoutes.js';
+import exportRoutes from './routes/exportRoutes.js';
+import copilotRoutes from './routes/copilotRoutes.js';
 import errorHandler from './middlewares/errorHandler.js';
 import notFoundHandler from './middlewares/notFoundHandler.js';
 
@@ -58,6 +60,12 @@ app.use('/analytics', analyticsRoutes);
 
 // Budget Routes (GET /budgets, POST /budgets, PATCH /budgets/:id, DELETE /budgets/:id)
 app.use('/budgets', budgetRoutes);
+
+// Export Routes (GET /exports/transactions?format=csv|pdf)
+app.use('/exports', exportRoutes);
+
+// Copilot Financial Context Routes (GET/POST /copilot/context/...)
+app.use('/copilot', copilotRoutes);
 
 // 404 Handler for undefined routes
 app.use(notFoundHandler);
