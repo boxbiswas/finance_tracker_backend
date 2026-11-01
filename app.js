@@ -28,7 +28,10 @@ connectDB();
 
 // CORS configuration (supports credentials for httpOnly cookies)
 app.use(cors({
-    origin: 'http://localhost:5173' || process.env.CLIENT_URL,
+    origin: [
+        "http://localhost:5173",
+        process.env.CLIENT_URL
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
