@@ -72,13 +72,13 @@ export const getChartContext = async (req, res, next) => {
   }
 };
 
-// POST /copilot/query - Primary AI Copilot query endpoint executing the full Day 14 flow
+// POST /copilot/query - Primary AI Copilot query endpoint executing the full Day 14 and Day 15 flow
 export const handleCopilotQuery = async (req, res, next) => {
   try {
-    const { question, action, chartType, filters } = req.body || {};
+    const { question, action, chartType, filters, dashboardContext, messages } = req.body || {};
     const result = await processCopilotQuery(
       req.user.id,
-      { question, action, chartType, filters },
+      { question, action, chartType, filters, dashboardContext, messages },
       req.user
     );
     res.status(200).json({ status: 'success', data: result });

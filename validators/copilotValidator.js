@@ -85,7 +85,7 @@ export const chartDataSchema = z.object({
 
 // General Copilot context query schema
 export const copilotQuerySchema = z.object({
-  question: z.string().trim().optional(),
+  question: z.string().trim().min(1, 'Question cannot be empty'),
   action: z.enum([
     'financial_summary',
     'category_breakdown',
@@ -96,6 +96,21 @@ export const copilotQuerySchema = z.object({
     'all'
   ]).optional(),
   chartType: z.enum(['monthly_comparison', 'category_breakdown', 'net_cash_flow_trend']).optional(),
-  filters: z.record(z.any()).optional().default({})
+  filters: z.record(z.any()).optional().default({}),
+  dashboardContext: z.object({
+    dateRange: z.object({
+      from: z.string().optional().or(z.literal('')),
+      to: z.string().optional().or(z.literal('')),
+      months: z.number().optional()
+    }).optional(),
+    selectedChart: z.string().optional(),
+    activeFilters: z.record(z.any()).optional()
+  }).optional().default({}),
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'copilot', 'model']).optional(),
+    sender: z.enum(['user', 'copilot', 'assistant']).optional(),
+    content: z.string().optional(),
+    text: z.string().optional()
+  })).optional().default([])
 });
 

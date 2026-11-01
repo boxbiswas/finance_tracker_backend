@@ -1,46 +1,79 @@
 import OpenAI from 'openai';
 
 // Configurable AI Provider Service supporting Gemini, OpenAI, and a database-grounded local fallback
-export const generateAIResponse = async ({ systemPrompt, userMessage, context = {} }) => {
+export const generateAIResponse = async ({ systemPrompt, userMessage, context = {}, conversationHistory = [] }) => {
   const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY.includes('your_') ? process.env.GEMINI_API_KEY : null;
+  const openaiKey = process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.includes('your_') ? process.env.OPENAI_API_KEY : null;
 
   // 1. Google Gemini API Provider
   if ((provider === 'gemini' && geminiKey) || (!openaiKey && geminiKey)) {
     try {
-      const model = process.env.AI_MODEL || 'gemini-1.5-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+      const primaryModel = process.env.AI_MODEL || 'gemini-1.5-flash';
+
+      const contents = [];
+      // Append recent conversation messages for follow-up conversational context
+      conversationHistory.slice(-6).forEach((msg) => {
+        const isUserMsg = msg.sender === 'user' || msg.role === 'user';
+        const textContent = msg.text || msg.content;
+        if (textContent) {
+          contents.push({
+            role: isUserMsg ? 'user' : 'model',
+            parts: [{ text: textContent }]
+          });
+        }
+      });
+
+      // Append current user message with verified database context
+      contents.push({
+        role: 'user',
+        parts: [
+          {
+            text: `${userMessage}\n\n[Active Financial Context Data]:\n${JSON.stringify(context, null, 2)}`
+          }
+        ]
+      });
 
       const payload = {
         systemInstruction: {
           parts: [{ text: systemPrompt }]
         },
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `${userMessage}\n\n[Financial Context Data]:\n${JSON.stringify(context, null, 2)}`
-              }
-            ]
-          }
-        ],
+        contents,
         generationConfig: {
           temperature: 0.2,
           maxOutputTokens: 600
         }
       };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      // Helper to execute request with both x-goog-api-key header and query parameter
+      const callGemini = async (modelName) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
+        return fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10000)
+        });
+      };
+
+      // Attempt execution with configured model
+      let response = await callGemini(primaryModel);
+
+      // If configured model returns 404 (not found in v1beta), fallback to standard gemini-1.5-flash
+      if (!response.ok && response.status === 404 && primaryModel !== 'gemini-1.5-flash') {
+        console.warn(`Gemini model "${primaryModel}" returned 404, falling back to gemini-1.5-flash.`);
+        response = await callGemini('gemini-1.5-flash');
+      }
 
       if (!response.ok) {
-        const errorBody = await response.text();
-        console.warn('Gemini API call failed, falling back to verified context generator:', errorBody);
+        if (response.status === 429) {
+          console.warn('Gemini API rate limit reached (429), serving database-grounded analysis.');
+        } else {
+          console.warn(`Gemini API returned status ${response.status}, serving database-grounded analysis.`);
+        }
         return generateGroundedFallback(userMessage, context);
       }
 
@@ -58,19 +91,25 @@ export const generateAIResponse = async ({ systemPrompt, userMessage, context = 
   // 2. OpenAI API Provider
   if ((provider === 'openai' && openaiKey) || openaiKey) {
     try {
-      const openai = new OpenAI({ apiKey: openaiKey });
+      const openai = new OpenAI({ apiKey: openaiKey, timeout: 10000 });
       const model = process.env.AI_MODEL || 'gpt-4o-mini';
+
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...conversationHistory.slice(-6).map((msg) => ({
+          role: msg.sender === 'user' || msg.role === 'user' ? 'user' : 'assistant',
+          content: msg.text || msg.content || ''
+        })),
+        {
+          role: 'user',
+          content: `${userMessage}\n\n[Active Financial Context Data]:\n${JSON.stringify(context, null, 2)}`
+        }
+      ];
 
       const completion = await openai.chat.completions.create({
         model,
         temperature: 0.2,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content: `${userMessage}\n\n[Financial Context Data]:\n${JSON.stringify(context, null, 2)}`
-          }
-        ]
+        messages
       });
 
       const rawText = completion.choices?.[0]?.message?.content;
@@ -97,6 +136,11 @@ export const sanitizeAIResponse = (text) => {
     .replace(/actual\s+balance/gi, 'recorded balance')
     // Remove unwanted script tags or raw HTML
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    // Redact internal secrets, connection URIs, and API keys
+    .replace(/mongodb(\+srv)?:\/\/[^\s]+/gi, '[DATABASE_URI_REDACTED]')
+    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+    .replace(/AQ\.[0-9A-Za-z-_]{30,}/g, '[API_KEY_REDACTED]')
+    .replace(/sk-[0-9A-Za-z]{20,}/g, '[API_KEY_REDACTED]')
     .trim();
 
   return sanitized;
@@ -108,6 +152,27 @@ const generateGroundedFallback = (question, context) => {
   const summary = context?.summary || context?.currentMonth;
   const breakdown = context?.breakdown || context?.spendingConcentration;
   const budgets = context?.budgets || context?.budgetAdherence;
+
+  // Edge Case: External queries that cannot be grounded in personal transaction records
+  if (
+    q.includes('stock') ||
+    q.includes('crypto') ||
+    q.includes('bitcoin') ||
+    q.includes('weather') ||
+    q.includes('news') ||
+    q.includes('invest in') ||
+    q.includes('tax advice')
+  ) {
+    return 'I can only analyze your recorded personal transactions, category budgets, and net cash flow. External financial markets, stock prices, and general web information are not part of your personal ledger.';
+  }
+
+  // Edge Case: Ledger has zero transactions recorded in the requested period
+  const totalCount = summary?.transactionCount ?? (context?.transactions?.length || 0);
+  const inc = summary?.totalIncome ?? summary?.income ?? 0;
+  const exp = summary?.totalExpense ?? summary?.expense ?? 0;
+  if (totalCount === 0 && inc === 0 && exp === 0 && !breakdown?.topCategory) {
+    return 'No transactions have been recorded in your ledger for this period yet. Once you log income or expenses, I can analyze your spending trends, category distributions, and budget adherence.';
+  }
 
   // Spending / Expense inquiry
   if (q.includes('spend') || q.includes('spent') || q.includes('how much did i spend')) {
@@ -179,8 +244,6 @@ const generateGroundedFallback = (question, context) => {
   }
 
   // General grounded summary
-  const inc = summary?.totalIncome ?? summary?.income ?? 0;
-  const exp = summary?.totalExpense ?? summary?.expense ?? 0;
   const net = summary?.netCashFlow ?? (inc - exp);
   return `Based on your database records, your recorded income is ₹${inc.toLocaleString('en-IN')}, expenses are ₹${exp.toLocaleString('en-IN')}, and net cash flow is ₹${net.toLocaleString('en-IN')}.`;
 };
